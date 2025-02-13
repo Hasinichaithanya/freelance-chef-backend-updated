@@ -116,8 +116,8 @@ app.post("/user-signup", async (req, res) => {
   const userDetails = req.body;
   if (Object.keys(userDetails).length == 0)
     return res.status(404).json({ message: "Cannot add empty user!" });
-  const hashedPassword = await bcrypt.hash(userDetails.Password, 10);
-  userDetails.Password = hashedPassword;
+  const hashedPassword = await bcrypt.hash(userDetails.password, 10);
+  userDetails.password = hashedPassword;
   users
     .insertOne(userDetails)
     .then((userDetails) => {
