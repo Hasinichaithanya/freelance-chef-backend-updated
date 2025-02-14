@@ -178,7 +178,7 @@ app.get("/get-chef/", async (req, res) => {
 });
 app.get("/get-user/", async (req, res) => {
   const { id } = req.query;
-  console.log(id);
+  // console.log(id);
   var message;
   if (!mongodb.ObjectId.isValid(id)) {
     return res.status(404).json({ success: false, message: "Invalid User ID" });
@@ -220,18 +220,51 @@ app.put("/chef-profile", async (req, res) => {
 
 app.put("/change-password", async (req, res) => {
   try {
-    const { id, oldPassword, newPassword } = req.body;
-    // console.log(req.body);
-    console.log(id, oldPassword, newPassword);
-    const chef = chefs.findOne({ _id: new mongodb.ObjectId(id) });
-    if (chef) {
+    const { user, id, oldPassword, newPassword } = req.body;
+    // console.log(user, id, oldPassword, newPassword);
+    if (!mongodb.ObjectId.isValid(id)) {
+      res.status(400).json({
+        message: "Invalid ID, could not proceed",
+        status: 400,
+      });
+      return;
+    }
+    let userData, chef;
+    if (user === "user") {
+      userData = await users.findOne({ _id: new mongodb.ObjectId(id) });
+      if (!userData) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const passwordMatch = await bcrypt.compare(
+        oldPassword,
+        userData.password
+      );
+      if (passwordMatch) {
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        await users.findOneAndUpdate(
+          { _id: new mongodb.ObjectId(id) },
+          { $set: { password: hashedPassword } }
+        );
+        res.json({ message: "Password updated successfully", status: 200 });
+      } else {
+        res.json({
+          message: "Old password did not match, retry!",
+          status: 400,
+        });
+      }
+    } else {
+      chef = await chefs.findOne({ _id: new mongodb.ObjectId(id) });
+      if (!chef) {
+        return res.status(404).json({ message: "Chef not found" });
+      }
       const passwordMatch = await bcrypt.compare(oldPassword, chef.Password);
       if (passwordMatch) {
-        const hashedPassword = await bcrypt.hash(chefDetails.Password, 10);
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
 
         await chefs.findOneAndUpdate(
-          { email: req.user.email },
-          { hashedPassword }
+          { _id: new mongodb.ObjectId(id) },
+          { $set: { Password: hashedPassword } }
         );
         res.json({ message: "Password updated successfully", status: 200 });
       } else {
@@ -248,7 +281,6 @@ app.put("/change-password", async (req, res) => {
 
 app.post("/send-mail", async (req, res) => {
   const { chefId, userId, time, date, selectedItems } = req.body;
-  console.log(chefId, userId, time, selectedItems);
 
   try {
     const user = await users.findOne({ _id: new mongodb.ObjectId(userId) });
@@ -272,7 +304,6 @@ app.post("/send-mail", async (req, res) => {
       { _id: new mongodb.ObjectId(chefId) },
       { $push: { orders: { time, date, selectedItems } } }
     );
-    console.log(user, user.email, "245");
     const mailOptions = {
       from: user.email,
       to: ["to-email@gmail.com", chef.email],
@@ -304,8 +335,7 @@ app.delete("/delete-all", async (req, res) => {
 app.post("/update-comments/:id", async (req, res) => {
   const { id } = req.params;
   const { comments } = req.body;
-  console.log(`Updating comments for chef with ID: ${id}`);
-  console.log(`New comments: ${comments}`);
+
   try {
     const result = await chefs.updateOne(
       { _id: new mongodb.ObjectId(id) },
@@ -317,7 +347,6 @@ app.post("/update-comments/:id", async (req, res) => {
       return res.status(404).send({ message: "Chef not found" });
     }
 
-    console.log(`Comments updated successfully for chef with ID: ${id}`);
     res.status(200).send({ message: "Comments updated successfully" });
   } catch (error) {
     console.error(`Error updating comments for chef with ID ${id}:`, error);
@@ -328,35 +357,82 @@ app.post("/update-comments/:id", async (req, res) => {
 app.post("/update-likes/:id", async (req, res) => {
   const { id } = req.params;
   const { isLiked } = req.body;
-  console.log(isLiked);
+  if (!mongodb.ObjectId.isValid(id)) {
+    res.status(400).json({
+      message: "Invalid ID, could not proceed",
+      status: 400,
+    });
+    return;
+  }
   try {
-    let result;
-    if (isLiked) {
-      result = await chefs.updateOne(
-        { _id: new mongodb.ObjectId(id) },
-        { $inc: { likes: 1 } }
-      );
-    } else {
-      result = await chefs.updateOne(
-        { _id: new mongodb.ObjectId(id) },
-        { $inc: { likes: -1 } }
-      );
-    }
+    const chef = await chefs.findOne({ _id: new mongodb.ObjectId(id) });
 
-    if (result.modifiedCount === 0) {
+    if (!chef) {
       return res.status(404).send({ message: "Chef not found" });
     }
 
-    res.status(200).send({ message: "Likes updated successfully" });
+    let newLikes = chef.likes + (isLiked ? 1 : -1);
+
+    if (newLikes < 0) {
+      newLikes = 0;
+    }
+
+    const result = await chefs.updateOne(
+      { _id: new mongodb.ObjectId(id) },
+      { $set: { likes: newLikes } }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(400).send({ message: "Failed to update likes" });
+    }
+
+    res
+      .status(200)
+      .send({ message: "Likes updated successfully", likes: newLikes });
   } catch (error) {
     res.status(500).send({ message: "Failed to update likes", error });
   }
 });
 
+// app.post("/update-likes/:id", async (req, res) => {
+//   const { id } = req.params;
+//   const { isLiked } = req.body;
+//   console.log(isLiked);
+//   try {
+//     let result;
+//     if (isLiked) {
+//       result = await chefs.updateOne(
+//         { _id: new mongodb.ObjectId(id) },
+//         { $inc: { likes: 1 } }
+//       );
+//     } else {
+//       result = await chefs.updateOne(
+//         { _id: new mongodb.ObjectId(id) },
+//         { $inc: { likes: -1 } }
+//       );
+//     }
+
+//     if (result.modifiedCount === 0) {
+//       return res.status(404).send({ message: "Chef not found" });
+//     }
+
+//     res.status(200).send({ message: "Likes updated successfully" });
+//   } catch (error) {
+//     res.status(500).send({ message: "Failed to update likes", error });
+//   }
+// });
+
 // Get bookings for a chef to disable booked dates
 app.get("/bookings/:chefId", async (req, res) => {
   const { chefId } = req.params;
-  console.log(chefId);
+  // console.log(chefId);
+  if (!mongodb.ObjectId.isValid(chefId)) {
+    res.status(400).json({
+      message: "Invalid ID, could not proceed",
+      status: 400,
+    });
+    return;
+  }
   try {
     const bookings = await chefs.findOne({ _id: new mongodb.ObjectId(chefId) });
 
@@ -393,7 +469,6 @@ app.post("/contact-us", async (req, res) => {
     text: `You have a new contact message\n\n From ${name} and they sent a message as ${message}`,
   };
   const response = await transporter.sendMail(mailOptions);
-  console.log(response);
 });
 
 app.listen(8080, () => {
